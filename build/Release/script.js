@@ -49,9 +49,11 @@ var GATT_CLIENT_CHARAC_CFG_UUID     = 0x2902;
 var GATT_SERVER_CHARAC_CFG_UUID     = 0x2903;
 
 
-var disc_services = [];
+var disc_services = {};
+var disc_characteristics = {};
+var disc_descriptors = {};
 
-var discoverServices = function(uuids) {
+var discoverServices = function(uuids, servicesDiscovered) {
   var services = [];
 
   var callback = function(data) {
@@ -80,7 +82,10 @@ var discoverServices = function(uuids) {
 
         disc_services[services[i].uuid] = services[i];
 	debug("added service " + disc_services[services[i].uuid].uuid + " with startHandle " + disc_services[services[i].uuid].startHandle + " and endHandle " + disc_services[services[i].uuid].endHandle );
+	debug("services are now " + Object.keys(disc_services));
+	
       }
+      servicesDiscovered();
     } else {
       queueCommand(readByGroupRequest(services[services.length - 1].endHandle + 1, 0xffff, GATT_PRIM_SVC_UUID), callback);
     }
@@ -124,6 +129,144 @@ var readByGroupRequest = function(startHandle, endHandle, groupUuid) {
   buf.writeUInt16LE(startHandle, 1);
   buf.writeUInt16LE(endHandle, 3);
   buf.writeUInt16LE(groupUuid, 5);
+
+  return buf;
+};
+
+readByTypeRequest = function(startHandle, endHandle, groupUuid) {
+  var buf = new Buffer(7);
+
+  buf.writeUInt8(ATT_OP_READ_BY_TYPE_REQ, 0);
+  buf.writeUInt16LE(startHandle, 1);
+  buf.writeUInt16LE(endHandle, 3);
+  buf.writeUInt16LE(groupUuid, 5);
+
+  return buf;
+};
+
+discoverCharacteristics = function(serviceUuid, characteristicUuids, discoverDone) {
+  var service = disc_services[serviceUuid];
+  var characteristics = [];
+
+  disc_characteristics[serviceUuid] = {};
+  disc_descriptors[serviceUuid] = {};
+
+  var callback = function(data) {
+    var opcode = data[0];
+    var i = 0;
+
+    if (opcode === ATT_OP_READ_BY_TYPE_RESP) {
+      var type = data[1];
+      var num = (data.length - 2) / type;
+
+      for (i = 0; i < num; i++) {
+        characteristics.push({
+          startHandle: data.readUInt16LE(2 + i * type + 0),
+          properties: data.readUInt8(2 + i * type + 2),
+          valueHandle: data.readUInt16LE(2 + i * type + 3),
+          uuid: (type == 7) ? data.readUInt16LE(2 + i * type + 5).toString(16) : data.slice(2 + i * type + 5).slice(0, 16).toString('hex').match(/.{1,2}/g).reverse().join('')
+        });
+      }
+    }
+
+    if (opcode !== ATT_OP_READ_BY_TYPE_RESP || characteristics[characteristics.length - 1].valueHandle === service.endHandle) {
+
+      var characteristicsDiscovered = [];
+      for (i = 0; i < characteristics.length; i++) {
+        var properties = characteristics[i].properties;
+
+        var characteristic = {
+          properties: [],
+          uuid: characteristics[i].uuid
+        };
+
+        if (i !== 0) {
+          characteristics[i - 1].endHandle = characteristics[i].startHandle - 1;
+        }
+
+        if (i === (characteristics.length - 1)) {
+          characteristics[i].endHandle = service.endHandle;
+        }
+
+        disc_characteristics[serviceUuid][characteristics[i].uuid] = characteristics[i];
+
+        if (properties & 0x01) {
+          characteristic.properties.push('broadcast');
+        }
+
+        if (properties & 0x02) {
+          characteristic.properties.push('read');
+        }
+
+        if (properties & 0x04) {
+          characteristic.properties.push('writeWithoutResponse');
+        }
+
+        if (properties & 0x08) {
+          characteristic.properties.push('write');
+        }
+
+        if (properties & 0x10) {
+          characteristic.properties.push('notify');
+        }
+
+        if (properties & 0x20) {
+          characteristic.properties.push('indicate');
+        }
+
+        if (properties & 0x40) {
+          characteristic.properties.push('authenticatedSignedWrites');
+        }
+
+        if (properties & 0x80) {
+          characteristic.properties.push('extendedProperties');
+        }
+
+        if (characteristicUuids.length === 0 || characteristicUuids.indexOf(characteristic.uuid) !== -1) {
+          characteristicsDiscovered.push(characteristic);
+	  debug("added characteristic " + characteristic.uuid);
+        }
+      }
+
+      //this.emit('characteristicsDiscover', this._address, serviceUuid, characteristicsDiscovered);
+      discoverDone(serviceUuid);
+    } else {
+      queueCommand(readByTypeRequest(characteristics[characteristics.length - 1].valueHandle + 1, service.endHandle, GATT_CHARAC_UUID), callback);
+    }
+  }
+
+  queueCommand(readByTypeRequest(service.startHandle, service.endHandle, GATT_CHARAC_UUID), callback);
+};
+
+var write = function(serviceUuid, characteristicUuid, data, withoutResponse) {
+  var characteristic = disc_characteristics[serviceUuid][characteristicUuid];
+
+  if (withoutResponse) {
+    queueCommand(writeRequest(characteristic.valueHandle, data, true), null, function() {
+      //this.emit('write', this._address, serviceUuid, characteristicUuid);
+      debug("write queued");
+    });
+  } else {
+    queueCommand(writeRequest(characteristic.valueHandle, data, false), function(data) {
+      var opcode = data[0];
+
+      if (opcode === ATT_OP_WRITE_RESP) {
+        //this.emit('write', this._address, serviceUuid, characteristicUuid);
+	debug("got write response");
+      }
+    });
+  }
+};
+
+writeRequest = function(handle, data, withoutResponse) {
+  var buf = new Buffer(3 + data.length);
+
+  buf.writeUInt8(withoutResponse ? ATT_OP_WRITE_CMD : ATT_OP_WRITE_REQ , 0);
+  buf.writeUInt16LE(handle, 1);
+
+  for (var i = 0; i < data.length; i++) {
+    buf.writeUInt8(data.readUInt8(i), i + 3);
+  }
 
   return buf;
 };
@@ -198,4 +341,19 @@ l2capBle_process.stdout.on('data', function(data){
 }
 });
 
-discoverServices([]);
+discoverServices([], function(){
+  debug("services discovered: " + Object.keys(disc_services));
+  Object.keys(disc_services).forEach(function(key) {
+    debug("discover characteristics for service " + key);
+    discoverCharacteristics(key, [], function(serviceUuid){
+      debug("done discovering characteristics for service " + serviceUuid);
+      if(serviceUuid == "1437"){
+	debug("has " + disc_characteristics[serviceUuid]["1439"].uuid);
+	var data = new Buffer("1234", "hex");
+	write(serviceUuid, disc_characteristics[serviceUuid]["1439"].uuid, data, false);
+      }
+    });
+  });
+  
+});
+

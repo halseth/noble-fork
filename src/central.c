@@ -200,7 +200,7 @@ int readByTypeRequest(uint8_t* buf, uint16_t startHandle, uint16_t endHandle,uin
   return 7;
 };
 
-#define COMMAND_QUEUE_SIZE	128
+#define COMMAND_QUEUE_SIZE	1024
 #define MAX_COMMAND_LENGTH	128
 
 uint8_t command_queue[COMMAND_QUEUE_SIZE][MAX_COMMAND_LENGTH];

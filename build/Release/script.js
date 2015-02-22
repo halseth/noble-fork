@@ -273,8 +273,10 @@ writeRequest = function(handle, data, withoutResponse) {
 
 // Running the C-program and piping output to console.log
 var l2capBle_dir = "/home/johan/noble/build/Release/l2cap-ble";
-var address = "EE:A3:64:61:F2:72";
-var addressType = "random";
+//var address = "EE:A3:64:61:F2:72";
+var address = "00:1B:DC:07:2D:12";
+//var address = "12:2D:07:DC:1B:00";
+var addressType = "public";
 var l2capBle_process = spawn(l2capBle_dir, [address, addressType]);
 
 l2capBle_process.stdout.on('data', function(data){
@@ -347,10 +349,14 @@ discoverServices([], function(){
     debug("discover characteristics for service " + key);
     discoverCharacteristics(key, [], function(serviceUuid){
       debug("done discovering characteristics for service " + serviceUuid);
-      if(serviceUuid == "1437"){
-	debug("has " + disc_characteristics[serviceUuid]["1439"].uuid);
-	var data = new Buffer("1234", "hex");
-	write(serviceUuid, disc_characteristics[serviceUuid]["1439"].uuid, data, false);
+      if(serviceUuid == "1337"){
+	debug("has " + disc_characteristics[serviceUuid]["1338"].uuid);
+	var data = new Buffer("0123456789012345678901234567890123456789", "hex");
+	for(var i = 0; i < 1000; i++){
+	  write(serviceUuid, disc_characteristics[serviceUuid]["1338"].uuid, data, true);
+	  console.log("" + (20*8*i) + "bits written");
+	}
+	console.log("Done writing");
       }
     });
   });

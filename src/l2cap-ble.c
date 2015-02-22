@@ -49,6 +49,9 @@ static void signalHandler(int signal) {
   lastSignal = signal;
 }
 
+char peripheral_addr[] = "00:1B:DC:07:2D:12";
+char peripheral_addr_type[] = "public";
+
 int main(int argc, const char* argv[]) {
   char *hciDeviceIdOverride = NULL;
   int hciDeviceId = 0;
@@ -137,8 +140,8 @@ int main(int argc, const char* argv[]) {
   // connect
   memset(&sockAddr, 0, sizeof(sockAddr));
   sockAddr.l2_family = AF_BLUETOOTH;
-  str2ba(argv[1], &sockAddr.l2_bdaddr);
-  sockAddr.l2_bdaddr_type = strcmp(argv[2], "random") == 0 ? BDADDR_LE_RANDOM : BDADDR_LE_PUBLIC;
+  str2ba(peripheral_addr, &sockAddr.l2_bdaddr);
+  sockAddr.l2_bdaddr_type = strcmp(peripheral_addr_type, "random") == 0 ? BDADDR_LE_RANDOM : BDADDR_LE_PUBLIC;
   sockAddr.l2_cid = htobs(ATT_CID);
 
   result = connect(l2capSock, (struct sockaddr *)&sockAddr, sizeof(sockAddr));
@@ -230,6 +233,7 @@ int main(int argc, const char* argv[]) {
         len = read(l2capSock, l2capSockBuf, sizeof(l2capSockBuf));
 
         if (len <= 0) {
+	 // printf("breaking!\n");
           break;
         }
 

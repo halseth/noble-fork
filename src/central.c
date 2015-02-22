@@ -37,6 +37,9 @@ wildcards did not work for me, ymmv.
 #define ATT_OP_READ_BY_TYPE_RESP	0x09
 #define ATT_OP_READ_BY_GROUP_REQ	0x10
 #define ATT_OP_READ_BY_GROUP_RESP	0x11
+#define ATT_OP_WRITE_REQ 		0x12
+#define ATT_OP_WRITE_RESP 		0x13
+#define ATT_OP_WRITE_CMD		0x52
 #define GATT_PRIM_SVC_UUID		0x2800
 #define GATT_CHARAC_UUID 		0x2803
 
@@ -247,9 +250,23 @@ int write_to_socket(char* stdinBuf, int length, int l2capSock)
       return 0;
 }
 
+int writeRequest(uint8_t* buf, uint16_t handle, uint8_t* data, int len, int withoutResponse) {
+  writeUInt8(&buf[0], withoutResponse ? ATT_OP_WRITE_CMD : ATT_OP_WRITE_REQ);
+  writeUInt16LE(&buf[1], handle);
+  int i;
+  for (i = 0; i < len; i++) {
+    writeUInt8(&buf[i+3], readUInt8(&data[i]));
+  }
+
+  return len+3;
+};
+
 
   
   uint8_t buffer[128];
+
+
+
 
 #define MAX_SERVICES		32
 #define MAX_CHARACTERISTICS	32
@@ -264,6 +281,27 @@ uint16_t characteristics_valueHandle[MAX_CHARACTERISTICS];
 uint16_t characteristics_uuid[MAX_CHARACTERISTICS];
 uint8_t characteristics_properties[MAX_CHARACTERISTICS];
 int characteristics_length;
+
+uint8_t write_data[] = {0x01,0x23,0x45,0x67,0x89,0x01,0x23,0x45,0x67,0x89,0x01,0x23,0x45,0x67,0x89,0x01,0x23,0x45,0x67,0x89};
+int write_data_len = 20;
+
+int write_characteristic(uint16_t characteristic, uint8_t* data, int data_length, int withoutResponse) {
+
+  if (withoutResponse) {
+    int len = writeRequest(buffer, characteristics_valueHandle[characteristic] , data, data_length, 1);
+    queue_command(buffer, len);
+    printf("write char queued\n");
+  }/* else {
+    queueCommand(writeRequest(characteristic.valueHandle, data, false), function(data) {
+      var opcode = data[0];
+
+      if (opcode === ATT_OP_WRITE_RESP) {
+        //this.emit('write', this._address, serviceUuid, characteristicUuid);
+	debug("got write response");
+      }
+    });
+  }*/
+};
 
 int handle_read_data(uint8_t* data, int len)
 {
@@ -318,6 +356,17 @@ int handle_read_data(uint8_t* data, int len)
 	}
 	characteristics_uuid[characteristics_length] = readUInt16LE(&data[2 + i * type + 5]);
 	printf("Added characteristics %02x with start handle %02x, properties %02x, valueHandle %02x\n", characteristics_uuid[characteristics_length], characteristics_startHandle[characteristics_length], characteristics_properties[characteristics_length], characteristics_valueHandle[characteristics_length]);
+	
+	if(characteristics_uuid[characteristics_length] == 0x1338)
+	{
+	  // We can now write to this characteristic
+	  int j;
+	  for(j = 0; j < 1000; j++)
+	  {
+	    write_characteristic(characteristics_length, write_data, write_data_len, 1);
+	  }
+	  
+	}
 	
 	characteristics_length++;
       }

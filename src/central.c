@@ -33,9 +33,12 @@ wildcards did not work for me, ymmv.
 #define BDADDR_LE_RANDOM       0x02
 
 
+#define ATT_OP_READ_BY_TYPE_REQ		0x08
+#define ATT_OP_READ_BY_TYPE_RESP	0x09
 #define ATT_OP_READ_BY_GROUP_REQ	0x10
 #define ATT_OP_READ_BY_GROUP_RESP	0x11
 #define GATT_PRIM_SVC_UUID		0x2800
+#define GATT_CHARAC_UUID 		0x2803
 
 struct sockaddr_l2 {
   sa_family_t    l2_family;
@@ -173,8 +176,21 @@ uint16_t readUInt16LE(uint8_t* buf)
   return (buf[0] & 0xff) | (buf[1] << 8);
 }
 
+uint8_t readUInt8(uint8_t* buf)
+{
+  return buf[0];
+}
+
 int readByGroupRequest(uint8_t* buf, uint16_t startHandle, uint16_t endHandle, uint16_t groupUuid) {
   writeUInt8(&buf[0], ATT_OP_READ_BY_GROUP_REQ);
+  writeUInt16LE(&buf[1], startHandle);
+  writeUInt16LE(&buf[3], endHandle);
+  writeUInt16LE(&buf[5], groupUuid);
+  return 7;
+};
+
+int readByTypeRequest(uint8_t* buf, uint16_t startHandle, uint16_t endHandle,uint16_t groupUuid) {
+  writeUInt8(&buf[0], ATT_OP_READ_BY_TYPE_REQ);
   writeUInt16LE(&buf[1], startHandle);
   writeUInt16LE(&buf[3], endHandle);
   writeUInt16LE(&buf[5], groupUuid);
@@ -231,24 +247,36 @@ int write_to_socket(char* stdinBuf, int length, int l2capSock)
       return 0;
 }
 
-#define MAX_SERVICES	32
 
+  
+  uint8_t buffer[128];
+
+#define MAX_SERVICES		32
+#define MAX_CHARACTERISTICS	32
 
 uint16_t services_startHandle[MAX_SERVICES];
 uint16_t services_endHandle[MAX_SERVICES];
 uint16_t services_uuid[MAX_SERVICES];
 int services_length = 0;
 
-void handle_read_data(uint8_t* data, int len)
+uint16_t characteristics_startHandle[MAX_CHARACTERISTICS];
+uint16_t characteristics_valueHandle[MAX_CHARACTERISTICS];
+uint16_t characteristics_uuid[MAX_CHARACTERISTICS];
+uint8_t characteristics_properties[MAX_CHARACTERISTICS];
+int characteristics_length;
+
+int handle_read_data(uint8_t* data, int len)
 {
   uint8_t att_opcode = data[0];
+  uint8_t type;
+  int num;
+  int i;
   switch(att_opcode)
   {
     case ATT_OP_READ_BY_GROUP_RESP:
       printf("Got response\n");
-      uint8_t type = data[1];
-      int num = (len - 2) / type;
-      int i;
+      type = data[1];
+      num = (len - 2) / type;
       for (i = 0; i < num; i++) {
 	services_startHandle[services_length] = readUInt16LE(&data[2 + i * type + 0]);
 	services_endHandle[services_length] = readUInt16LE(&data[2 + i * type + 2]);
@@ -259,7 +287,39 @@ void handle_read_data(uint8_t* data, int len)
 	}
 	services_uuid[services_length] = readUInt16LE(&data[2 + i * type + 4]);
 	printf("Added service %02x with start handle %02x and end handle %02x\n", services_uuid[services_length], services_startHandle[services_length], services_endHandle[services_length]);
+	
+	// Now discover characteristics for 1337
+	if(services_uuid[services_length] == 0x1337)
+	{
+	  printf("Discovering characterisstics\n");
+	  int length = readByTypeRequest(buffer, services_startHandle[services_length], services_endHandle[services_length], GATT_CHARAC_UUID);
+	    int err = queue_command(buffer, length);
+	    if(err != 0)
+	    {
+	      printf("Error queueing command!\n");
+	      return 1;
+	    }
+	}
 	services_length++;
+      }
+      break;
+    case ATT_OP_READ_BY_TYPE_RESP:
+      type = data[1];
+      num = (len - 2) / type;
+
+      for (i = 0; i < num; i++) {
+	characteristics_startHandle[characteristics_length] = readUInt16LE(&data[2 + i * type + 0]);
+	characteristics_properties[characteristics_length] = readUInt8(&data[2 + i * type + 2]);
+	characteristics_valueHandle[characteristics_length] = readUInt16LE(&data[2 + i * type + 3]);
+	if(type != 7)
+	{
+	   printf("Error, type is not 7\n");
+	   exit(1);
+	}
+	characteristics_uuid[characteristics_length] = readUInt16LE(&data[2 + i * type + 5]);
+	printf("Added characteristics %02x with start handle %02x, properties %02x, valueHandle %02x\n", characteristics_uuid[characteristics_length], characteristics_startHandle[characteristics_length], characteristics_properties[characteristics_length], characteristics_valueHandle[characteristics_length]);
+	
+	characteristics_length++;
       }
       break;
     default:
@@ -274,15 +334,13 @@ int main(int argc, const char* argv[]) {
 
   int l2capSock = connect_to_peripheral(peripheral_addr, peripheral_addr_type);
   
-  uint8_t buffer[128];
-  
   // Discover services request
   size_t length = readByGroupRequest(buffer, 0x0001, 0xffff, GATT_PRIM_SVC_UUID);
   int err = queue_command(buffer, length);
   if(err != 0)
   {
-  printf("Error queueing command!\n");
-  return 1;
+    printf("Error queueing command!\n");
+    return 1;
   }
 
   fd_set rfds;

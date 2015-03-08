@@ -160,6 +160,20 @@ int connect_to_peripheral(char* addr, char* addr_type) {
   printf("disconnect\n");
   
   success:  
+  /*
+  result = hci_le_conn_update(hciSocket, hciHandle, 
+		     htobs(0x0006), // min interval
+		     htobs(0x0006),  // max interbval
+		     0,  // latency
+		     htobs(0x0100), // supervision to
+		     10000 // to
+		    );
+  
+  if(result != 0){
+      printf("ERROR: Conn update failed: %d. %s\n", result, strerror(errno));
+      exit(1);
+  }
+  */
   return l2capSock;
 }
 
